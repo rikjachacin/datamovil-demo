@@ -38,7 +38,7 @@ def get_target_total(data: pd.DataFrame) -> float:
     if data.empty:
         return 0
 
-    target_rows = data.drop_duplicates(["cliente", "mes"])
+    target_rows = data.drop_duplicates(["vendedor", "cliente", "mes"])
     return target_rows["objetivo_venta"].sum()
 
 
@@ -87,6 +87,7 @@ def build_client_summary(data: pd.DataFrame) -> pd.DataFrame:
     sales = (
         data.groupby("cliente", as_index=False)
         .agg(
+            vendedor=("vendedor", lambda values: ", ".join(sorted(values.unique()))),
             venta_total=("venta_total", "sum"),
             unidades=("unidades", "sum"),
             pedidos=("pedido_id", "nunique"),
@@ -99,6 +100,48 @@ def build_client_summary(data: pd.DataFrame) -> pd.DataFrame:
         .agg(objetivo_venta=("objetivo_venta", "sum"))
     )
     summary = sales.merge(targets, on="cliente", how="left")
+    summary["cumplimiento"] = (
+        summary["venta_total"] / summary["objetivo_venta"].replace({0: pd.NA}) * 100
+    ).fillna(0)
+    summary["ticket_promedio"] = summary["venta_total"] / summary["pedidos"]
+    summary["estado"] = summary["cumplimiento"].apply(
+        lambda value: "Sobre objetivo" if value >= 100 else "Por debajo"
+    )
+    return summary
+
+
+def build_seller_summary(data: pd.DataFrame) -> pd.DataFrame:
+    if data.empty:
+        return pd.DataFrame(
+            columns=[
+                "vendedor",
+                "venta_total",
+                "objetivo_venta",
+                "cumplimiento",
+                "unidades",
+                "clientes",
+                "pedidos",
+                "ticket_promedio",
+                "estado",
+            ]
+        )
+
+    sales = (
+        data.groupby("vendedor", as_index=False)
+        .agg(
+            venta_total=("venta_total", "sum"),
+            unidades=("unidades", "sum"),
+            clientes=("cliente", "nunique"),
+            pedidos=("pedido_id", "nunique"),
+        )
+        .sort_values("venta_total", ascending=False)
+    )
+    targets = (
+        data.drop_duplicates(["vendedor", "cliente", "mes"])
+        .groupby("vendedor", as_index=False)
+        .agg(objetivo_venta=("objetivo_venta", "sum"))
+    )
+    summary = sales.merge(targets, on="vendedor", how="left")
     summary["cumplimiento"] = (
         summary["venta_total"] / summary["objetivo_venta"].replace({0: pd.NA}) * 100
     ).fillna(0)
@@ -165,6 +208,21 @@ sales_data = load_sales_data()
 
 with st.sidebar:
     st.header("Panel de control")
+    selected_module = st.radio(
+        "Modulo",
+        ["Directivos / Gerentes", "Vendedores"],
+    )
+    selected_seller = "Todos los vendedores"
+    if selected_module == "Vendedores":
+        selected_seller = st.selectbox(
+            "Vendedor",
+            sorted(sales_data["vendedor"].unique().tolist()),
+        )
+    else:
+        selected_seller = st.selectbox(
+            "Equipo comercial",
+            ["Todos los vendedores"] + sorted(sales_data["vendedor"].unique().tolist()),
+        )
     selected_client = st.selectbox(
         "Cliente analizado",
         ["Todos los clientes"] + sorted(sales_data["cliente"].unique().tolist()),
@@ -182,6 +240,9 @@ with st.sidebar:
 
 filtered_data = sales_data.copy()
 
+if selected_seller != "Todos los vendedores":
+    filtered_data = filtered_data[filtered_data["vendedor"] == selected_seller]
+
 if selected_client != "Todos los clientes":
     filtered_data = filtered_data[filtered_data["cliente"] == selected_client]
 
@@ -193,13 +254,20 @@ if selected_products:
 
 kpis = calculate_kpis(filtered_data)
 client_summary = build_client_summary(filtered_data)
+seller_summary = build_seller_summary(filtered_data)
 gap_label = "sobre objetivo" if kpis["target_gap"] >= 0 else "por debajo del objetivo"
 
+hero_copy = (
+    "Vista gerencial para monitorear ventas, vendedores, clientes, cumplimiento de objetivo y oportunidades comerciales."
+    if selected_module == "Directivos / Gerentes"
+    else f"Vista del vendedor {selected_seller} para seguir su desempeno, clientes atendidos y avance contra objetivo."
+)
+
 st.markdown(
-    """
+    f"""
     <div class="hero">
         <h1>DataMovil</h1>
-        <p>Dashboard comercial para priorizar clientes, medir cumplimiento de objetivo y convertir datos del ERP en decisiones de ventas.</p>
+        <p>{hero_copy}</p>
     </div>
     """,
     unsafe_allow_html=True,
@@ -266,6 +334,14 @@ with insight_left:
 with insight_right:
     if client_summary.empty:
         st.info("No hay datos para los filtros seleccionados.")
+    elif selected_module == "Directivos / Gerentes" and not seller_summary.empty:
+        top_seller = seller_summary.iloc[0]
+        st.write(
+            f"El vendedor con mayor venta es **{top_seller['vendedor']}**, con "
+            f"**{format_currency(top_seller['venta_total'])}** facturados, "
+            f"**{format_percent(top_seller['cumplimiento'])}** de cumplimiento "
+            f"y **{int(top_seller['clientes'])}** clientes atendidos."
+        )
     else:
         top_client = client_summary.iloc[0]
         st.write(
@@ -273,6 +349,38 @@ with insight_right:
             f"**{format_currency(top_client['venta_total'])}** facturados y "
             f"**{format_percent(top_client['cumplimiento'])}** de cumplimiento."
         )
+
+if selected_module == "Directivos / Gerentes":
+    st.markdown(
+        '<div class="section-title">Ranking de vendedores</div>',
+        unsafe_allow_html=True,
+    )
+    seller_chart = (
+        alt.Chart(seller_summary)
+        .mark_bar(cornerRadiusEnd=5)
+        .encode(
+            x=alt.X("venta_total:Q", title="Ventas facturadas"),
+            y=alt.Y("vendedor:N", sort="-x", title=None),
+            color=alt.Color(
+                "estado:N",
+                scale=alt.Scale(
+                    domain=["Sobre objetivo", "Por debajo"],
+                    range=[BRAND_GREEN, BRAND_AMBER],
+                ),
+                legend=alt.Legend(title="Estado"),
+            ),
+            tooltip=[
+                alt.Tooltip("vendedor:N", title="Vendedor"),
+                alt.Tooltip("venta_total:Q", title="Ventas", format="$,.2f"),
+                alt.Tooltip("objetivo_venta:Q", title="Objetivo", format="$,.2f"),
+                alt.Tooltip("cumplimiento:Q", title="Cumplimiento", format=".1f"),
+                alt.Tooltip("clientes:Q", title="Clientes", format=","),
+                alt.Tooltip("pedidos:Q", title="Pedidos", format=","),
+            ],
+        )
+        .properties(height=230)
+    )
+    st.altair_chart(seller_chart, width="stretch")
 
 chart_left, chart_right = st.columns([1.35, 1])
 
@@ -378,6 +486,7 @@ display_summary["Ticket promedio"] = display_summary["ticket_promedio"].map(
 display_summary = display_summary[
     [
         "cliente",
+        "vendedor",
         "Ventas",
         "Objetivo",
         "Cumplimiento",
@@ -389,6 +498,7 @@ display_summary = display_summary[
 ].rename(
     columns={
         "cliente": "Cliente",
+        "vendedor": "Vendedor",
         "unidades": "Unidades",
         "pedidos": "Pedidos",
         "estado": "Estado",
@@ -403,6 +513,7 @@ with st.expander("Ver pedidos simulados"):
             "fecha": "Fecha",
             "mes": "Mes",
             "cliente": "Cliente",
+            "vendedor": "Vendedor",
             "producto": "Linea",
             "unidades": "Unidades",
             "precio_unitario": "Precio unitario",

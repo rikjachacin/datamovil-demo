@@ -19,6 +19,9 @@ como vitrina de Business Intelligence para ventas.
 - Evolucion mensual de ventas
 - Tabla de clientes priorizados
 - Detalle de pedidos simulados
+- Modulo Directivos/Gerentes
+- Modulo Vendedores
+- Ranking y filtros por vendedor
 
 ## Ejecutar
 
@@ -39,6 +42,7 @@ CSV, base de datos, API o ERP, manteniendo estas columnas:
 - `fecha`
 - `mes`
 - `cliente`
+- `vendedor`
 - `producto`
 - `unidades`
 - `precio_unitario`
