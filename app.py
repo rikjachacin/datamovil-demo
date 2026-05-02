@@ -35,6 +35,27 @@ def format_percent(value: float) -> str:
     return f"{value:.1f}%"
 
 
+def render_progress_bar(value: float):
+    safe_value = max(0, min(value, 130))
+    bar_width = safe_value / 130 * 100
+    marker_left = 100 / 130 * 100
+    color = BRAND_GREEN if value >= 100 else BRAND_AMBER
+    st.markdown(
+        f"""
+        <div style="background:#FFFFFF;border:1px solid #E5E7EB;border-radius:8px;padding:18px 18px 26px;">
+            <div style="position:relative;height:42px;background:#F1F5F9;border-radius:6px;overflow:hidden;">
+                <div style="height:42px;width:{bar_width:.2f}%;background:{color};border-radius:6px;"></div>
+                <div style="position:absolute;left:{marker_left:.2f}%;top:0;height:42px;border-left:3px dashed {BRAND_RED};"></div>
+            </div>
+            <div style="display:flex;justify-content:space-between;margin-top:12px;color:#64748B;font-size:0.85rem;">
+                <span>0%</span><span>50%</span><span>100% meta</span><span>130%</span>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 def get_target_total(data: pd.DataFrame) -> float:
     if data.empty:
         return 0
@@ -365,36 +386,7 @@ st.markdown('<div class="section-title">Lectura comercial</div>', unsafe_allow_h
 insight_left, insight_right = st.columns([1.15, 1])
 
 with insight_left:
-    target_color = BRAND_GREEN if kpis["target_percentage"] >= 100 else BRAND_AMBER
-    progress_data = pd.DataFrame(
-        {
-            "KPI": ["Cumplimiento"],
-            "Porcentaje": [min(kpis["target_percentage"], 130)],
-            "Meta": [100],
-        }
-    )
-    progress_chart = (
-        alt.Chart(progress_data)
-        .mark_bar(cornerRadius=5, height=34, color=target_color)
-        .encode(
-            x=alt.X(
-                "Porcentaje:Q",
-                scale=alt.Scale(domain=[0, 130]),
-                axis=alt.Axis(title=None, format=".0f", labelExpr="datum.value + '%'"),
-            ),
-            y=alt.Y("KPI:N", axis=None),
-            tooltip=[
-                alt.Tooltip("Porcentaje:Q", title="Cumplimiento", format=".1f"),
-            ],
-        )
-        .properties(height=80)
-    )
-    rule = (
-        alt.Chart(progress_data)
-        .mark_rule(color=BRAND_RED, strokeDash=[6, 4], size=2)
-        .encode(x="Meta:Q")
-    )
-    st.altair_chart(progress_chart + rule, width="stretch")
+    render_progress_bar(kpis["target_percentage"])
 
 with insight_right:
     if client_summary.empty:
