@@ -21,6 +21,7 @@ MUTED = "#6B7280"
 PANEL = "#FFFFFF"
 LINE = "#E5E7EB"
 DEMO_REFERENCE_DATE = pd.Timestamp("2026-05-02")
+APP_VERSION = "DataMovil v0.3 - vendedores"
 
 
 def format_currency(value: float) -> str:
@@ -293,6 +294,7 @@ sales_data = load_sales_data()
 
 with st.sidebar:
     st.header("Panel de control")
+    st.caption(APP_VERSION)
     selected_module = st.radio(
         "Modulo",
         ["Directivos / Gerentes", "Vendedores"],
@@ -377,7 +379,7 @@ col3.metric(
     f"{kpis['order_count']} pedidos",
 )
 col4.metric(
-    "Ticket promedio por pedido",
+    "Promedio por pedido",
     format_currency(kpis["average_ticket"]),
     "Ventas / pedidos",
 )
