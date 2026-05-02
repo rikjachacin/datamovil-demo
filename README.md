@@ -22,6 +22,9 @@ como vitrina de Business Intelligence para ventas.
 - Modulo Directivos/Gerentes
 - Modulo Vendedores
 - Ranking y filtros por vendedor
+- Cartera comercial por vendedor
+- Oportunidades sugeridas por cliente
+- Brecha contra objetivo por cliente
 
 ## Ejecutar
 

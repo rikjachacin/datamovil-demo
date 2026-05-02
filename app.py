@@ -20,6 +20,7 @@ INK = "#111827"
 MUTED = "#6B7280"
 PANEL = "#FFFFFF"
 LINE = "#E5E7EB"
+DEMO_REFERENCE_DATE = pd.Timestamp("2026-05-02")
 
 
 def format_currency(value: float) -> str:
@@ -152,6 +153,61 @@ def build_seller_summary(data: pd.DataFrame) -> pd.DataFrame:
     return summary
 
 
+def build_seller_client_opportunities(data: pd.DataFrame) -> pd.DataFrame:
+    if data.empty:
+        return pd.DataFrame(
+            columns=[
+                "cliente",
+                "ultima_compra",
+                "dias_sin_compra",
+                "venta_total",
+                "objetivo_venta",
+                "cumplimiento",
+                "brecha",
+                "unidades",
+                "pedidos",
+                "accion_sugerida",
+            ]
+        )
+
+    sales = (
+        data.groupby("cliente", as_index=False)
+        .agg(
+            ultima_compra=("fecha", "max"),
+            venta_total=("venta_total", "sum"),
+            unidades=("unidades", "sum"),
+            pedidos=("pedido_id", "nunique"),
+        )
+        .sort_values("venta_total", ascending=False)
+    )
+    targets = (
+        data.drop_duplicates(["cliente", "mes"])
+        .groupby("cliente", as_index=False)
+        .agg(objetivo_venta=("objetivo_venta", "sum"))
+    )
+    summary = sales.merge(targets, on="cliente", how="left")
+    summary["ultima_compra"] = pd.to_datetime(summary["ultima_compra"])
+    summary["dias_sin_compra"] = (
+        DEMO_REFERENCE_DATE - summary["ultima_compra"]
+    ).dt.days.clip(lower=0)
+    summary["cumplimiento"] = (
+        summary["venta_total"] / summary["objetivo_venta"].replace({0: pd.NA}) * 100
+    ).fillna(0)
+    summary["brecha"] = summary["venta_total"] - summary["objetivo_venta"]
+
+    def suggest_action(row):
+        if row["cumplimiento"] < 70:
+            return "Priorizar visita comercial"
+        if row["dias_sin_compra"] >= 25:
+            return "Reactivar recompra"
+        if row["brecha"] < 0:
+            return "Impulsar objetivo pendiente"
+        return "Mantener seguimiento"
+
+    summary["accion_sugerida"] = summary.apply(suggest_action, axis=1)
+    return summary.sort_values(["cumplimiento", "dias_sin_compra"], ascending=[True, False])
+
+
 st.markdown(
     f"""
     <style>
@@ -193,10 +249,18 @@ st.markdown(
         color: rgba(255,255,255,0.86);
         font-size: 1.02rem;
     }}
-    .section-title {{
+.section-title {{
         font-size: 1.08rem;
         font-weight: 750;
         margin: 10px 0 8px;
+    }}
+    .seller-note {{
+        background: #ECFDF5;
+        border: 1px solid #A7F3D0;
+        border-radius: 8px;
+        color: #064E3B;
+        padding: 14px 16px;
+        margin: 12px 0 18px;
     }}
     </style>
     """,
@@ -255,6 +319,7 @@ if selected_products:
 kpis = calculate_kpis(filtered_data)
 client_summary = build_client_summary(filtered_data)
 seller_summary = build_seller_summary(filtered_data)
+seller_opportunities = build_seller_client_opportunities(filtered_data)
 gap_label = "sobre objetivo" if kpis["target_gap"] >= 0 else "por debajo del objetivo"
 
 hero_copy = (
@@ -381,6 +446,90 @@ if selected_module == "Directivos / Gerentes":
         .properties(height=230)
     )
     st.altair_chart(seller_chart, width="stretch")
+
+if selected_module == "Vendedores":
+    st.markdown(
+        '<div class="section-title">Mi cartera comercial</div>',
+        unsafe_allow_html=True,
+    )
+    if seller_opportunities.empty:
+        st.info("No hay clientes para los filtros seleccionados.")
+    else:
+        urgent_clients = seller_opportunities[
+            seller_opportunities["accion_sugerida"].isin(
+                ["Priorizar visita comercial", "Reactivar recompra"]
+            )
+        ]
+        urgent_count = len(urgent_clients)
+        best_client = seller_opportunities.sort_values(
+            "venta_total", ascending=False
+        ).iloc[0]
+        st.markdown(
+            f"""
+            <div class="seller-note">
+                <strong>{selected_seller}</strong>: tienes <strong>{len(seller_opportunities)}</strong> clientes en cartera.
+                El cliente con mayor venta es <strong>{best_client['cliente']}</strong>.
+                Hay <strong>{urgent_count}</strong> clientes que requieren atencion prioritaria.
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        opportunity_chart = (
+            alt.Chart(seller_opportunities)
+            .mark_bar(cornerRadiusEnd=5)
+            .encode(
+                x=alt.X("brecha:Q", title="Brecha vs objetivo"),
+                y=alt.Y("cliente:N", sort="x", title=None),
+                color=alt.condition(
+                    alt.datum.brecha >= 0,
+                    alt.value(BRAND_GREEN),
+                    alt.value(BRAND_RED),
+                ),
+                tooltip=[
+                    alt.Tooltip("cliente:N", title="Cliente"),
+                    alt.Tooltip("venta_total:Q", title="Ventas", format="$,.2f"),
+                    alt.Tooltip("objetivo_venta:Q", title="Objetivo", format="$,.2f"),
+                    alt.Tooltip("brecha:Q", title="Brecha", format="$,.2f"),
+                    alt.Tooltip("cumplimiento:Q", title="Cumplimiento", format=".1f"),
+                    alt.Tooltip("accion_sugerida:N", title="Accion"),
+                ],
+            )
+            .properties(height=260)
+        )
+        st.altair_chart(opportunity_chart, width="stretch")
+
+        seller_display = seller_opportunities.copy()
+        seller_display["Ultima compra"] = seller_display["ultima_compra"].dt.strftime(
+            "%Y-%m-%d"
+        )
+        seller_display["Ventas"] = seller_display["venta_total"].map(format_currency)
+        seller_display["Objetivo"] = seller_display["objetivo_venta"].map(
+            format_currency
+        )
+        seller_display["Brecha"] = seller_display["brecha"].map(format_currency)
+        seller_display["Cumplimiento"] = seller_display["cumplimiento"].map(
+            format_percent
+        )
+        seller_display = seller_display[
+            [
+                "cliente",
+                "Ventas",
+                "Objetivo",
+                "Brecha",
+                "Cumplimiento",
+                "dias_sin_compra",
+                "Ultima compra",
+                "accion_sugerida",
+            ]
+        ].rename(
+            columns={
+                "cliente": "Cliente",
+                "dias_sin_compra": "Dias sin compra",
+                "accion_sugerida": "Accion sugerida",
+            }
+        )
+        st.dataframe(seller_display, width="stretch", hide_index=True)
 
 chart_left, chart_right = st.columns([1.35, 1])
 
