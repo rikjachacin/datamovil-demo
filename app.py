@@ -21,7 +21,7 @@ MUTED = "#6B7280"
 PANEL = "#FFFFFF"
 LINE = "#E5E7EB"
 DEMO_REFERENCE_DATE = pd.Timestamp("2026-05-02")
-APP_VERSION = "DataMovil v0.3 - vendedores"
+APP_VERSION = "DataMovil v0.4 - directivos"
 
 
 def format_currency(value: float) -> str:
@@ -215,6 +215,47 @@ def build_seller_client_opportunities(data: pd.DataFrame) -> pd.DataFrame:
     return summary.sort_values(["cumplimiento", "dias_sin_compra"], ascending=[True, False])
 
 
+def build_executive_alerts(client_data: pd.DataFrame, seller_data: pd.DataFrame):
+    alerts = []
+    if not seller_data.empty:
+        top_seller = seller_data.sort_values("venta_total", ascending=False).iloc[0]
+        weakest_seller = seller_data.sort_values("cumplimiento", ascending=True).iloc[0]
+        alerts.append(
+            {
+                "Indicador": "Vendedor destacado",
+                "Detalle": top_seller["vendedor"],
+                "Lectura": f"{format_currency(top_seller['venta_total'])} vendidos",
+            }
+        )
+        alerts.append(
+            {
+                "Indicador": "Mayor brecha de equipo",
+                "Detalle": weakest_seller["vendedor"],
+                "Lectura": f"{format_percent(weakest_seller['cumplimiento'])} de cumplimiento",
+            }
+        )
+
+    if not client_data.empty:
+        critical_clients = client_data[client_data["cumplimiento"] < 70]
+        top_client = client_data.sort_values("venta_total", ascending=False).iloc[0]
+        alerts.append(
+            {
+                "Indicador": "Cliente principal",
+                "Detalle": top_client["cliente"],
+                "Lectura": f"{format_currency(top_client['venta_total'])} vendidos",
+            }
+        )
+        alerts.append(
+            {
+                "Indicador": "Clientes criticos",
+                "Detalle": str(len(critical_clients)),
+                "Lectura": "Cumplimiento menor a 70%",
+            }
+        )
+
+    return pd.DataFrame(alerts)
+
+
 st.markdown(
     f"""
     <style>
@@ -320,6 +361,7 @@ kpis = calculate_kpis(filtered_data)
 client_summary = build_client_summary(filtered_data)
 seller_summary = build_seller_summary(filtered_data)
 seller_opportunities = build_seller_client_opportunities(filtered_data)
+executive_alerts = build_executive_alerts(client_summary, seller_summary)
 gap_label = "sobre objetivo" if kpis["target_gap"] >= 0 else "por debajo del objetivo"
 
 hero_copy = (
@@ -383,6 +425,70 @@ else:
     )
 
 if selected_module == "Directivos / Gerentes":
+    st.markdown(
+        '<div class="section-title">Resumen ejecutivo</div>',
+        unsafe_allow_html=True,
+    )
+    if executive_alerts.empty:
+        st.info("No hay indicadores ejecutivos para los filtros seleccionados.")
+    else:
+        st.dataframe(executive_alerts, width="stretch", hide_index=True)
+
+    exec_left, exec_right = st.columns([1.1, 1])
+
+    with exec_left:
+        st.markdown(
+            '<div class="section-title">Cumplimiento por vendedor</div>',
+            unsafe_allow_html=True,
+        )
+        seller_target_chart = (
+            alt.Chart(seller_summary)
+            .mark_bar(cornerRadiusEnd=5)
+            .encode(
+                x=alt.X("cumplimiento:Q", title="Cumplimiento de objetivo"),
+                y=alt.Y("vendedor:N", sort="-x", title=None),
+                color=alt.condition(
+                    alt.datum.cumplimiento >= 100,
+                    alt.value(BRAND_GREEN),
+                    alt.value(BRAND_AMBER),
+                ),
+                tooltip=[
+                    alt.Tooltip("vendedor:N", title="Vendedor"),
+                    alt.Tooltip("cumplimiento:Q", title="Cumplimiento", format=".1f"),
+                    alt.Tooltip("venta_total:Q", title="Ventas", format="$,.2f"),
+                    alt.Tooltip("objetivo_venta:Q", title="Objetivo", format="$,.2f"),
+                ],
+            )
+            .properties(height=220)
+        )
+        st.altair_chart(seller_target_chart, width="stretch")
+
+    with exec_right:
+        st.markdown(
+            '<div class="section-title">Clientes bajo objetivo</div>',
+            unsafe_allow_html=True,
+        )
+        critical_clients = (
+            client_summary[client_summary["cumplimiento"] < 70]
+            .sort_values("cumplimiento")
+            .copy()
+        )
+        if critical_clients.empty:
+            st.success("No hay clientes por debajo del 70% de cumplimiento.")
+        else:
+            critical_clients["Ventas"] = critical_clients["venta_total"].map(
+                format_currency
+            )
+            critical_clients["Cumplimiento"] = critical_clients["cumplimiento"].map(
+                format_percent
+            )
+            st.dataframe(
+                critical_clients[["cliente", "vendedor", "Ventas", "Cumplimiento"]]
+                .rename(columns={"cliente": "Cliente", "vendedor": "Vendedor"}),
+                width="stretch",
+                hide_index=True,
+            )
+
     st.markdown(
         '<div class="section-title">Ranking de vendedores</div>',
         unsafe_allow_html=True,
