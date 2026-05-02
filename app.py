@@ -37,24 +37,9 @@ def format_percent(value: float) -> str:
 
 
 def render_progress_bar(value: float):
-    safe_value = max(0, min(value, 130))
-    bar_width = safe_value / 130 * 100
-    marker_left = 100 / 130 * 100
-    color = BRAND_GREEN if value >= 100 else BRAND_AMBER
-    st.markdown(
-        f"""
-        <div style="background:#FFFFFF;border:1px solid #E5E7EB;border-radius:8px;padding:18px 18px 26px;">
-            <div style="position:relative;height:42px;background:#F1F5F9;border-radius:6px;overflow:hidden;">
-                <div style="height:42px;width:{bar_width:.2f}%;background:{color};border-radius:6px;"></div>
-                <div style="position:absolute;left:{marker_left:.2f}%;top:0;height:42px;border-left:3px dashed {BRAND_RED};"></div>
-            </div>
-            <div style="display:flex;justify-content:space-between;margin-top:12px;color:#64748B;font-size:0.85rem;">
-                <span>0%</span><span>50%</span><span>100% meta</span><span>130%</span>
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    progress_value = max(0, min(value / 100, 1))
+    st.progress(progress_value)
+    st.caption(f"Avance actual: {format_percent(value)} | Meta: 100%")
 
 
 def get_target_total(data: pd.DataFrame) -> float:
@@ -276,14 +261,6 @@ st.markdown(
         font-weight: 750;
         margin: 10px 0 8px;
     }}
-    .seller-note {{
-        background: #ECFDF5;
-        border: 1px solid #A7F3D0;
-        border-radius: 8px;
-        color: #064E3B;
-        padding: 14px 16px;
-        margin: 12px 0 18px;
-    }}
     </style>
     """,
     unsafe_allow_html=True,
@@ -385,29 +362,25 @@ col4.metric(
 )
 
 st.markdown('<div class="section-title">Lectura comercial</div>', unsafe_allow_html=True)
-insight_left, insight_right = st.columns([1.15, 1])
+render_progress_bar(kpis["target_percentage"])
 
-with insight_left:
-    render_progress_bar(kpis["target_percentage"])
-
-with insight_right:
-    if client_summary.empty:
-        st.info("No hay datos para los filtros seleccionados.")
-    elif selected_module == "Directivos / Gerentes" and not seller_summary.empty:
-        top_seller = seller_summary.iloc[0]
-        st.write(
-            f"El vendedor con mayor venta es **{top_seller['vendedor']}**, con "
-            f"**{format_currency(top_seller['venta_total'])}** facturados, "
-            f"**{format_percent(top_seller['cumplimiento'])}** de cumplimiento "
-            f"y **{int(top_seller['clientes'])}** clientes atendidos."
-        )
-    else:
-        top_client = client_summary.iloc[0]
-        st.write(
-            f"El cliente con mayor venta es **{top_client['cliente']}**, con "
-            f"**{format_currency(top_client['venta_total'])}** facturados y "
-            f"**{format_percent(top_client['cumplimiento'])}** de cumplimiento."
-        )
+if client_summary.empty:
+    st.info("No hay datos para los filtros seleccionados.")
+elif selected_module == "Directivos / Gerentes" and not seller_summary.empty:
+    top_seller = seller_summary.iloc[0]
+    st.info(
+        f"El vendedor con mayor venta es {top_seller['vendedor']}, con "
+        f"{format_currency(top_seller['venta_total'])} facturados, "
+        f"{format_percent(top_seller['cumplimiento'])} de cumplimiento "
+        f"y {int(top_seller['clientes'])} clientes atendidos."
+    )
+else:
+    top_client = client_summary.iloc[0]
+    st.info(
+        f"El cliente con mayor venta es {top_client['cliente']}, con "
+        f"{format_currency(top_client['venta_total'])} facturados y "
+        f"{format_percent(top_client['cumplimiento'])} de cumplimiento."
+    )
 
 if selected_module == "Directivos / Gerentes":
     st.markdown(
@@ -458,15 +431,10 @@ if selected_module == "Vendedores":
         best_client = seller_opportunities.sort_values(
             "venta_total", ascending=False
         ).iloc[0]
-        st.markdown(
-            f"""
-            <div class="seller-note">
-                <strong>{selected_seller}</strong>: tienes <strong>{len(seller_opportunities)}</strong> clientes en cartera.
-                El cliente con mayor venta es <strong>{best_client['cliente']}</strong>.
-                Hay <strong>{urgent_count}</strong> clientes que requieren atencion prioritaria.
-            </div>
-            """,
-            unsafe_allow_html=True,
+        st.success(
+            f"{selected_seller}: tienes {len(seller_opportunities)} clientes en cartera. "
+            f"El cliente con mayor venta es {best_client['cliente']}. "
+            f"Hay {urgent_count} clientes que requieren atencion prioritaria."
         )
 
         opportunity_chart = (
