@@ -23,6 +23,8 @@ como vitrina de Business Intelligence para ventas.
 - Modulo Vendedores
 - Ranking y filtros por vendedor
 - Resumen ejecutivo para gerencia
+- Centro de mando gerencial
+- Prioridad del dia
 - Cumplimiento por vendedor
 - Clientes criticos bajo objetivo
 - Cartera comercial por vendedor

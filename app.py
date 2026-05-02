@@ -21,7 +21,7 @@ MUTED = "#6B7280"
 PANEL = "#FFFFFF"
 LINE = "#E5E7EB"
 DEMO_REFERENCE_DATE = pd.Timestamp("2026-05-02")
-APP_VERSION = "DataMovil v0.4 - directivos"
+APP_VERSION = "DataMovil v0.5 - centro de mando"
 
 
 def format_currency(value: float) -> str:
@@ -256,6 +256,50 @@ def build_executive_alerts(client_data: pd.DataFrame, seller_data: pd.DataFrame)
     return pd.DataFrame(alerts)
 
 
+def get_executive_snapshot(client_data: pd.DataFrame, seller_data: pd.DataFrame):
+    snapshot = {
+        "top_seller": None,
+        "weakest_seller": None,
+        "top_client": None,
+        "critical_clients": pd.DataFrame(),
+        "priority_text": "No hay datos suficientes para generar prioridad.",
+    }
+
+    if not seller_data.empty:
+        snapshot["top_seller"] = seller_data.sort_values(
+            "venta_total", ascending=False
+        ).iloc[0]
+        snapshot["weakest_seller"] = seller_data.sort_values(
+            "cumplimiento", ascending=True
+        ).iloc[0]
+
+    if not client_data.empty:
+        snapshot["top_client"] = client_data.sort_values(
+            "venta_total", ascending=False
+        ).iloc[0]
+        snapshot["critical_clients"] = client_data[
+            client_data["cumplimiento"] < 70
+        ].sort_values("cumplimiento")
+
+    if snapshot["weakest_seller"] is not None and not snapshot["critical_clients"].empty:
+        priority_client = snapshot["critical_clients"].iloc[0]
+        snapshot["priority_text"] = (
+            f"Prioridad del dia: revisar a {snapshot['weakest_seller']['vendedor']} "
+            f"y recuperar avance en {priority_client['cliente']}."
+        )
+    elif snapshot["weakest_seller"] is not None:
+        snapshot["priority_text"] = (
+            f"Prioridad del dia: acompanar a {snapshot['weakest_seller']['vendedor']} "
+            "para cerrar brecha contra objetivo."
+        )
+    elif snapshot["top_client"] is not None:
+        snapshot["priority_text"] = (
+            f"Prioridad del dia: proteger venta en {snapshot['top_client']['cliente']}."
+        )
+
+    return snapshot
+
+
 st.markdown(
     f"""
     <style>
@@ -361,7 +405,7 @@ kpis = calculate_kpis(filtered_data)
 client_summary = build_client_summary(filtered_data)
 seller_summary = build_seller_summary(filtered_data)
 seller_opportunities = build_seller_client_opportunities(filtered_data)
-executive_alerts = build_executive_alerts(client_summary, seller_summary)
+executive_snapshot = get_executive_snapshot(client_summary, seller_summary)
 gap_label = "sobre objetivo" if kpis["target_gap"] >= 0 else "por debajo del objetivo"
 
 hero_copy = (
@@ -426,13 +470,39 @@ else:
 
 if selected_module == "Directivos / Gerentes":
     st.markdown(
-        '<div class="section-title">Resumen ejecutivo</div>',
+        '<div class="section-title">Centro de mando gerencial</div>',
         unsafe_allow_html=True,
     )
-    if executive_alerts.empty:
-        st.info("No hay indicadores ejecutivos para los filtros seleccionados.")
-    else:
-        st.dataframe(executive_alerts, width="stretch", hide_index=True)
+    st.warning(executive_snapshot["priority_text"])
+
+    exec_kpi_1, exec_kpi_2, exec_kpi_3, exec_kpi_4 = st.columns(4)
+    top_seller = executive_snapshot["top_seller"]
+    weakest_seller = executive_snapshot["weakest_seller"]
+    top_client = executive_snapshot["top_client"]
+    critical_count = len(executive_snapshot["critical_clients"])
+
+    exec_kpi_1.metric(
+        "Vendedor destacado",
+        top_seller["vendedor"] if top_seller is not None else "Sin datos",
+        format_currency(top_seller["venta_total"]) if top_seller is not None else "",
+    )
+    exec_kpi_2.metric(
+        "Mayor brecha",
+        weakest_seller["vendedor"] if weakest_seller is not None else "Sin datos",
+        format_percent(weakest_seller["cumplimiento"])
+        if weakest_seller is not None
+        else "",
+    )
+    exec_kpi_3.metric(
+        "Cliente principal",
+        top_client["cliente"] if top_client is not None else "Sin datos",
+        format_currency(top_client["venta_total"]) if top_client is not None else "",
+    )
+    exec_kpi_4.metric(
+        "Clientes criticos",
+        str(critical_count),
+        "Bajo 70% de objetivo",
+    )
 
     exec_left, exec_right = st.columns([1.1, 1])
 
